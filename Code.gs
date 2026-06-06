@@ -1,4 +1,4 @@
-const APP_VERSION = "v2.0.15"; // CHANGE THIS NUMBER EVERY TIME YOU DEPLOY AN UPDATE!
+const APP_VERSION = "v2.0.13"; // CHANGE THIS NUMBER EVERY TIME YOU DEPLOY AN UPDATE!
 const SPREADSHEET_ID = '15CCGEz8Btj4iSWb7k46XO4Bg_j-e61eNNL7uviaEO_4'; // Replace with actual ID or use getActiveSpreadsheet() if bound
 const EXCHANGE_RATE = 500000; // 500,000 points = 1 Ticket
 
@@ -285,8 +285,7 @@ function saveScore(game, diff, score, token) {
     const MIN_DURATION_MS = {
       'Sudoku': 30000, 'Solitaire': 45000, 'Playdle': 15000,
       'Minesweeper': 20000, 'Tetris': 30000, '2048': 20000,
-      'Candy Run': 3000, 'Flappy Bot': 3000, // Allow quick deaths!
-      '8 Ball Pool': 10000
+      'Candy Run': 3000, 'Flappy Bot': 3000 // Allow quick deaths!
     };
     
     const startTime = parseInt(cache.get('game_start_' + user) || '0');
@@ -310,9 +309,7 @@ function saveScore(game, diff, score, token) {
       'Cyber Jump': 6000000, 'Candy Crush': 2500000, '4 Emojis 1 Word': 900000,
       'Severity 1: Core Breach': 25000000, 'Cosmic Merge': 1500000,
       'Sector 4: Containment': 450000, 'Angry Agents': 750000,
-      'Candy Run': 5000000, // ADDED CANDY RUN CAP
-      '8 Ball Pool': 250000,
-      'Battleship Command': 50000
+      'Candy Run': 5000000 // ADDED CANDY RUN CAP
     };
     
     if (MAX_SCORES[game] && finalScore > MAX_SCORES[game]) {
@@ -500,8 +497,7 @@ const ACHIEVEMENT_DEFS = {
   'piano_apprentice': { label: '🎵 Apprentice', desc: 'Reach a 50x combo in Piano Tiles.' },
   'piano_maestro': { label: '🎹 Maestro', desc: 'Reach a 100x combo in Piano Tiles.' },
   'blind_musician': { label: '🦇 Blind Musician', desc: 'Score 500+ points on Hard in Piano Tiles.' },
-  'spam_boss': { label: '👹 Inbox Zero', desc: 'Defeat the Boss in Spam Defender.' },
-  'naval_commander': { label: '🎖️ Naval Commander', desc: 'Secure a victory in Battleship Command.' }
+  'spam_boss': { label: '👹 Inbox Zero', desc: 'Defeat the Boss in Spam Defender.' }
 };
 
 function saveAchievement(achId) {
