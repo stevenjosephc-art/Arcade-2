@@ -548,17 +548,36 @@ canvas.addEventListener('mousedown',e=>{
     var mx=(e.clientX-r.left)*scX;
     var my=(e.clientY-r.top)*scY;
     Games[activeGameTitle].click?.(mx,my,e.button);
+    Games[activeGameTitle].mousedown?.(mx,my,e.button);
 });
 canvas.addEventListener('contextmenu',e=>e.preventDefault());
 canvas.addEventListener('mousemove', e => {
+  var r=canvas.getBoundingClientRect();
+  var scX=canvas.width/r.width;
+  var scY=canvas.height/r.height;
+  var mx=(e.clientX-r.left)*scX;
+  var my=(e.clientY-r.top)*scY;
+
   if(!isGameOver && !isPaused && activeGameTitle === 'Severity 1: Core Breach') {
-    var r=canvas.getBoundingClientRect();
-    keys['MouseX'] = (e.clientX-r.left)*(canvas.width/r.width);
-    keys['MouseY'] = (e.clientY-r.top)*(canvas.height/r.height);
+    keys['MouseX'] = mx;
+    keys['MouseY'] = my;
   }
+  if(!isGameOver && !isPaused && Games[activeGameTitle]?.engine==='canvas') {
+    Games[activeGameTitle].mousemove?.(mx,my);
+  }
+});
+window.addEventListener('mouseup', e => {
+  if(isGameOver||isPaused||Games[activeGameTitle]?.engine!=='canvas')return;
+  var r=canvas.getBoundingClientRect();
+  var scX=canvas.width/r.width;
+  var scY=canvas.height/r.height;
+  var mx=(e.clientX-r.left)*scX;
+  var my=(e.clientY-r.top)*scY;
+  Games[activeGameTitle].mouseup?.(mx,my,e.button);
 });
 
 var HOW_TO={
+  '8 Ball Pool': 'CLICK and DRAG on the cue ball to aim.\nPULL BACK to set power, then RELEASE to shoot.\nStandard 8-ball rules apply. Pot your set (solids or stripes) and then the 8-ball to win!',
   'Cafe Tycoon': 'CLICK the Coffee Cup rapidly to generate Cash.\nSpend Cash on upgrades to build passive income.\nYou have 3 Minutes to build the highest revenue possible!',
   'Candy Run': 'UP ARROW, W, SPACE, or CLICK to Jump.\nSurvive as long as possible and collect candies!\nChoose your hero before the run begins.',
   'Burger Boss': 'Click to pick up ingredients.\nCook raw meat on the grill (don\'t let it burn!).\nStack ingredients on the plate and click the BELL to serve.',
@@ -603,6 +622,382 @@ var POKEDEX_MAP = {};
 POKEDEX.forEach(function(p){ POKEDEX_MAP[p.id] = p; });
 
 var Games={
+
+  '8 Ball Pool': {
+    cat: 'Arcade', engine: 'canvas', icon: '🎱', dev: 'Cue Sports', rating: 4.8, installs: '500K',
+    init: function() {
+      this.tableW = 600; this.tableH = 300; this.ballR = 9;
+      this.offX = (700 - this.tableW) / 2; this.offY = (480 - this.tableH) / 2;
+      this.balls = []; this.cueBall = null; this.pocketR = 18;
+      this.pockets = [
+        {x: 0, y: 0}, {x: this.tableW/2, y: 0}, {x: this.tableW, y: 0},
+        {x: 0, y: this.tableH}, {x: this.tableW/2, y: this.tableH}, {x: this.tableW, y: this.tableH}
+      ];
+      this.friction = 0.985; this.minVel = 0.1; this.maxPower = 20;
+      this.state = 'aiming'; // aiming, shooting, moving, foul_ball_in_hand
+      this.turn = 'player'; // player, ai
+      this.playerSet = null; // solids, stripes
+      this.aiSet = null;
+      this.ballsPottedThisTurn = [];
+      this.firstBallHit = null;
+      this.potHistory = { player: [], ai: [] };
+      this.dragStart = null; this.dragCurrent = null;
+      this.isBreaking = true; this.winner = null;
+      this.message = 'Your Turn - Break!'; this.msgTimer = 120;
+      this.startTime = Date.now();
+      this.shotsTaken = 0;
+      this.playerBallsPotted = 0;
+      this.resetTable();
+      rawScore = 0;
+    },
+    resetTable: function() {
+      this.balls = [];
+      this.cueBall = { x: 150, y: this.tableH/2, vx: 0, vy: 0, type: 'cue', color: '#FFF', id: 0 };
+      this.balls.push(this.cueBall);
+      let rackX = 450, rackY = this.tableH / 2;
+      let ballIds = [1, 9, 2, 10, 8, 3, 11, 7, 14, 4, 12, 5, 13, 6, 15]; // Rack layout
+      let idx = 0;
+      for (let col = 0; col < 5; col++) {
+        for (let row = 0; row <= col; row++) {
+          let bX = rackX + col * (this.ballR * 1.75);
+          let bY = rackY + (row - col / 2) * (this.ballR * 2.1);
+          let id = ballIds[idx++];
+          let type = id === 8 ? '8ball' : (id < 8 ? 'solids' : 'stripes');
+          let color = this.getBallColor(id);
+          this.balls.push({ x: bX, y: bY, vx: 0, vy: 0, type: type, id: id, color: color });
+        }
+      }
+    },
+    getBallColor: function(id) {
+      const colors = [
+        '#FFF', '#FFD700', '#0000FF', '#FF0000', '#4B0082', '#FF8C00', '#006400', '#8B0000', '#000',
+        '#FFD700', '#0000FF', '#FF0000', '#4B0082', '#FF8C00', '#006400', '#8B0000'
+      ];
+      return colors[id] || '#AAA';
+    },
+    mousedown: function(mx, my) {
+      if (this.turn !== 'player' || this.winner) return;
+      let tx = mx - this.offX, ty = my - this.offY;
+      if (this.state === 'aiming') {
+        this.dragStart = { x: tx, y: ty };
+        this.dragCurrent = { x: tx, y: ty };
+      } else if (this.state === 'foul_ball_in_hand') {
+        this.cueBall.x = Math.max(this.ballR, Math.min(this.tableW - this.ballR, tx));
+        this.cueBall.y = Math.max(this.ballR, Math.min(this.tableH - this.ballR, ty));
+        this.state = 'aiming';
+        this.message = 'Ball Placed'; this.msgTimer = 60;
+      }
+    },
+    mousemove: function(mx, my) {
+      if (this.dragStart) {
+        this.dragCurrent = { x: mx - this.offX, y: my - this.offY };
+      }
+    },
+    mouseup: function(mx, my) {
+      if (this.dragStart && this.state === 'aiming') {
+        let dx = this.dragStart.x - this.dragCurrent.x;
+        let dy = this.dragStart.y - this.dragCurrent.y;
+        let dist = Math.sqrt(dx*dx + dy*dy);
+        if (dist > 5) {
+          this.shotsTaken++;
+          let angle = Math.atan2(dy, dx);
+          let power = Math.min(dist / 10, this.maxPower);
+          this.cueBall.vx = Math.cos(angle) * power;
+          this.cueBall.vy = Math.sin(angle) * power;
+          this.state = 'moving';
+          this.firstBallHit = null;
+          this.ballsPottedThisTurn = [];
+          playSound('jump');
+        }
+        this.dragStart = null; this.dragCurrent = null;
+      }
+    },
+    update: function() {
+      if (this.winner) return;
+      if (this.msgTimer > 0) this.msgTimer--;
+      if (this.state === 'moving') {
+        this.moveBalls();
+        if (this.allStopped()) {
+          this.resolveTurn();
+        }
+      } else if (this.turn === 'ai' && this.state === 'aiming') {
+        this.aiTurn();
+      }
+    },
+    moveBalls: function() {
+      for (let i = 0; i < this.balls.length; i++) {
+        let b = this.balls[i];
+        b.x += b.vx; b.y += b.vy;
+        b.vx *= this.friction; b.vy *= this.friction;
+        if (Math.abs(b.vx) < this.minVel) b.vx = 0;
+        if (Math.abs(b.vy) < this.minVel) b.vy = 0;
+        // Wall collisions
+        if (b.x < this.ballR || b.x > this.tableW - this.ballR) {
+          b.vx *= -0.8; b.x = b.x < this.ballR ? this.ballR : this.tableW - this.ballR;
+        }
+        if (b.y < this.ballR || b.y > this.tableH - this.ballR) {
+          b.vy *= -0.8; b.y = b.y < this.ballR ? this.ballR : this.tableH - this.ballR;
+        }
+        // Pocket check
+        for (let p of this.pockets) {
+          let d = Math.sqrt((b.x - p.x)**2 + (b.y - p.y)**2);
+          if (d < this.pocketR) {
+            this.ballsPottedThisTurn.push(this.balls.splice(i, 1)[0]);
+            i--; playSound('coin'); break;
+          }
+        }
+      }
+      // Ball-to-ball collisions
+      for (let i = 0; i < this.balls.length; i++) {
+        for (let j = i + 1; j < this.balls.length; j++) {
+          let b1 = this.balls[i], b2 = this.balls[j];
+          let dx = b2.x - b1.x, dy = b2.y - b1.y;
+          let dist = Math.sqrt(dx*dx + dy*dy);
+          if (dist < this.ballR * 2) {
+            if (b1.type === 'cue' && !this.firstBallHit) this.firstBallHit = b2;
+            if (b2.type === 'cue' && !this.firstBallHit) this.firstBallHit = b1;
+            // Collision physics
+            let angle = Math.atan2(dy, dx);
+            let sin = Math.sin(angle), cos = Math.cos(angle);
+            // Rotate velocities
+            let vx1 = b1.vx * cos + b1.vy * sin, vy1 = b1.vy * cos - b1.vx * sin;
+            let vx2 = b2.vx * cos + b2.vy * sin, vy2 = b2.vy * cos - b2.vx * sin;
+            // Elastic collision
+            let tmp = vx1; vx1 = vx2; vx2 = tmp;
+            // Rotate back
+            b1.vx = vx1 * cos - vy1 * sin; b1.vy = vy1 * cos + vx1 * sin;
+            b2.vx = vx2 * cos - vy2 * sin; b2.vy = vy2 * cos + vx2 * sin;
+            // Prevent overlap
+            let overlap = (this.ballR * 2 - dist) / 2;
+            b1.x -= overlap * cos; b1.y -= overlap * sin;
+            b2.x += overlap * cos; b2.y += overlap * sin;
+          }
+        }
+      }
+    },
+    allStopped: function() {
+      return this.balls.every(b => b.vx === 0 && b.vy === 0);
+    },
+    resolveTurn: function() {
+      let cueScratched = this.ballsPottedThisTurn.some(b => b.type === 'cue');
+      let eightPotted = this.ballsPottedThisTurn.find(b => b.type === '8ball');
+      let foul = false; let foulMsg = '';
+      let switchTurn = true;
+
+      if (cueScratched) {
+        foul = true; foulMsg = 'Cue Ball Scratched!';
+        this.cueBall.vx = 0; this.cueBall.vy = 0;
+        this.balls.push(this.cueBall);
+        this.state = 'foul_ball_in_hand';
+      }
+
+      if (eightPotted) {
+        let currentSet = this.turn === 'player' ? this.playerSet : this.aiSet;
+        let remaining = currentSet ? this.balls.filter(b => b.type === currentSet) : [];
+        if (currentSet && remaining.length === 0 && !foul) {
+          this.endGame(this.turn);
+        } else {
+          let msg = foul ? '8-Ball potted on foul!' : (currentSet ? 'Balls remaining!' : 'Table was open!');
+          this.endGame(this.turn === 'player' ? 'ai' : 'player', '8-Ball potted early: ' + msg);
+        }
+        return;
+      }
+
+      if (!foul && !this.isBreaking) {
+        let currentSet = this.turn === 'player' ? this.playerSet : this.aiSet;
+        if (this.firstBallHit) {
+          if (currentSet && this.firstBallHit.type !== currentSet && this.firstBallHit.type !== '8ball') {
+            foul = true; foulMsg = 'Wrong ball hit first!';
+          } else if (!currentSet && this.firstBallHit.type === '8ball') {
+             foul = true; foulMsg = '8-Ball hit first!';
+          }
+        } else {
+          foul = true; foulMsg = 'No ball hit!';
+        }
+      }
+
+      // Assign sets on first pot
+      if (!this.playerSet && this.ballsPottedThisTurn.length > 0 && !foul) {
+        let firstPot = this.ballsPottedThisTurn.find(b => b.type === 'solids' || b.type === 'stripes');
+        if (firstPot) {
+          this.playerSet = this.turn === 'player' ? firstPot.type : (firstPot.type === 'solids' ? 'stripes' : 'solids');
+          this.aiSet = this.playerSet === 'solids' ? 'stripes' : 'solids';
+          this.message = `Sets assigned: ${this.playerSet}`; this.msgTimer = 120;
+        }
+      }
+
+      if (!foul) {
+        let mySet = this.turn === 'player' ? this.playerSet : this.aiSet;
+        let myBalls = this.ballsPottedThisTurn.filter(b => b.type === mySet);
+        if (myBalls.length > 0) {
+          switchTurn = false;
+          if (this.turn === 'player') {
+            this.playerBallsPotted += myBalls.length;
+            rawScore += myBalls.length * 1000;
+          }
+        }
+      } else {
+        this.state = 'foul_ball_in_hand';
+      }
+
+      this.isBreaking = false;
+      if (switchTurn) {
+        this.turn = this.turn === 'player' ? 'ai' : 'player';
+        if (this.state !== 'foul_ball_in_hand') this.state = 'aiming';
+        this.message = this.turn === 'player' ? 'Your Turn' : "AI's Turn"; this.msgTimer = 90;
+      } else {
+        if (this.state !== 'foul_ball_in_hand') this.state = 'aiming';
+        this.message = this.turn === 'player' ? 'Nice Shot!' : "AI Shooting Again"; this.msgTimer = 90;
+      }
+    },
+    aiTurn: function() {
+      if (this.msgTimer > 0) return;
+      let targetSet = this.aiSet;
+      let targets = [];
+      if (!targetSet) {
+        targets = this.balls.filter(b => b.type === 'solids' || b.type === 'stripes');
+      } else {
+        targets = this.balls.filter(b => b.type === targetSet);
+      }
+
+      if (targets.length === 0) targets = this.balls.filter(b => b.type === '8ball');
+
+      let bestShot = null;
+      let errorScale = activeDiff === 'Easy' ? 0.22 : (activeDiff === 'Medium' ? 0.11 : 0.03);
+
+      for (let t of targets) {
+        for (let p of this.pockets) {
+          let dx = p.x - t.x, dy = p.y - t.y;
+          let distToPocket = Math.sqrt(dx*dx + dy*dy);
+          let angleToPocket = Math.atan2(dy, dx);
+
+          let ghostX = t.x - Math.cos(angleToPocket) * this.ballR * 2;
+          let ghostY = t.y - Math.sin(angleToPocket) * this.ballR * 2;
+
+          if (ghostX < this.ballR || ghostX > this.tableW - this.ballR || ghostY < this.ballR || ghostY > this.tableH - this.ballR) continue;
+
+          let cdx = ghostX - this.cueBall.x, cdy = ghostY - this.cueBall.y;
+          let distToGhost = Math.sqrt(cdx*cdx + cdy*cdy);
+          let angleToGhost = Math.atan2(cdy, cdx);
+
+          let obstructed = false;
+          for (let b of this.balls) {
+            if (b === this.cueBall || b === t) continue;
+            // Cue to Ghost
+            let d1 = this.distToSegment(b.x, b.y, this.cueBall.x, this.cueBall.y, ghostX, ghostY);
+            if (d1 < this.ballR * 2) { obstructed = true; break; }
+            // Target to Pocket
+            let d2 = this.distToSegment(b.x, b.y, t.x, t.y, p.x, p.y);
+            if (d2 < this.ballR * 2) { obstructed = true; break; }
+          }
+
+          let score = distToGhost + distToPocket + (obstructed ? 2000 : 0);
+          if (!bestShot || score < bestShot.score) {
+            bestShot = { angle: angleToGhost, power: Math.min(4 + distToGhost/25 + distToPocket/40, this.maxPower), score: score, dist: distToGhost };
+          }
+        }
+      }
+
+      if (bestShot) {
+        let finalError = (Math.random() - 0.5) * errorScale * (1 + bestShot.dist / 300);
+        let finalAngle = bestShot.angle + finalError;
+        this.cueBall.vx = Math.cos(finalAngle) * bestShot.power;
+        this.cueBall.vy = Math.sin(finalAngle) * bestShot.power;
+        this.state = 'moving';
+        this.firstBallHit = null;
+        this.ballsPottedThisTurn = [];
+        playSound('jump');
+      }
+    },
+    distToSegment: function(px, py, x1, y1, x2, y2) {
+      let l2 = (x1 - x2)**2 + (y1 - y2)**2;
+      if (l2 === 0) return Math.sqrt((px - x1)**2 + (py - y1)**2);
+      let t = ((px - x1) * (x2 - x1) + (py - y1) * (y2 - y1)) / l2;
+      t = Math.max(0, Math.min(1, t));
+      return Math.sqrt((px - (x1 + t * (x2 - x1)))**2 + (py - (y1 + t * (y2 - y1)))**2);
+    },
+    endGame: function(winner, reason) {
+      this.winner = winner;
+      this.message = winner === 'player' ? 'YOU WIN!' : 'AI WINS!';
+      if (reason) this.message += ' ' + reason;
+
+      if (winner === 'player') {
+        rawScore += 2000; // 8-ball bonus
+        let timeTaken = (Date.now() - this.startTime) / 1000;
+        let timeBonus = Math.max(0, Math.floor(10000 - timeTaken * 25));
+        let accuracyBonus = Math.floor((this.playerBallsPotted / Math.max(1, this.shotsTaken)) * 5000);
+        rawScore += timeBonus + accuracyBonus;
+        this.message += `\nTime: ${Math.floor(timeTaken)}s (+$${timeBonus})\nAcc: ${Math.floor(this.playerBallsPotted/this.shotsTaken*100)}% (+$${accuracyBonus})`;
+
+        google.script.run.withSuccessHandler(r => { if (r && r.isNew) showToast('🎱 Pool Shark — Achievement Unlocked!'); }).saveAchievement('pool_win');
+        if (this.aiSet) {
+          let aiBalls = this.balls.filter(b => b.type === this.aiSet);
+          if (aiBalls.length === 7) google.script.run.withSuccessHandler(r => { if (r && r.isNew) showToast('🧹 Clean Sweep — Achievement Unlocked!'); }).saveAchievement('pool_clean');
+        }
+      } else {
+        rawScore = Math.max(100, Math.floor(rawScore * 0.5)); // Penalty for losing
+      }
+
+      setTimeout(() => triggerGameOver(this.message), 2500);
+    },
+    draw: function() {
+      ctx.fillStyle = '#111'; ctx.fillRect(0, 0, 700, 480);
+      ctx.save(); ctx.translate(this.offX, this.offY);
+      // Table
+      ctx.fillStyle = '#5D4037'; ctx.fillRect(-15, -15, this.tableW+30, this.tableH+30); // Rail
+      ctx.fillStyle = '#2E7D32'; ctx.fillRect(0, 0, this.tableW, this.tableH); // Felt
+      // Pockets
+      ctx.fillStyle = '#111';
+      for (let p of this.pockets) {
+        ctx.beginPath(); ctx.arc(p.x, p.y, this.pocketR, 0, Math.PI*2); ctx.fill();
+      }
+      // Aiming line
+      if (this.state === 'aiming' && this.turn === 'player' && this.dragStart) {
+        let dx = this.dragStart.x - this.dragCurrent.x;
+        let dy = this.dragStart.y - this.dragCurrent.y;
+        let dist = Math.sqrt(dx*dx + dy*dy);
+        if (dist > 5) {
+          let angle = Math.atan2(dy, dx);
+          ctx.strokeStyle = 'rgba(255,255,255,0.5)'; ctx.setLineDash([5, 5]);
+          ctx.beginPath(); ctx.moveTo(this.cueBall.x, this.cueBall.y);
+          ctx.lineTo(this.cueBall.x + Math.cos(angle) * 500, this.cueBall.y + Math.sin(angle) * 500);
+          ctx.stroke(); ctx.setLineDash([]);
+          // Cue
+          let power = Math.min(dist / 10, this.maxPower);
+          ctx.strokeStyle = '#D7CCC8'; ctx.lineWidth = 4;
+          ctx.beginPath();
+          let cueX = this.cueBall.x - Math.cos(angle) * (20 + power * 2);
+          let cueY = this.cueBall.y - Math.sin(angle) * (20 + power * 2);
+          ctx.moveTo(cueX, cueY);
+          ctx.lineTo(cueX - Math.cos(angle) * 150, cueY - Math.sin(angle) * 150);
+          ctx.stroke();
+        }
+      }
+      // Balls
+      for (let b of this.balls) {
+        let grad = ctx.createRadialGradient(b.x-2, b.y-2, 1, b.x, b.y, this.ballR);
+        grad.addColorStop(0, '#FFF'); grad.addColorStop(0.3, b.color); grad.addColorStop(1, '#000');
+        ctx.fillStyle = grad; ctx.beginPath(); ctx.arc(b.x, b.y, this.ballR, 0, Math.PI*2); ctx.fill();
+        if (b.type === 'stripes') {
+          ctx.strokeStyle = '#FFF'; ctx.lineWidth = 3; ctx.beginPath();
+          ctx.arc(b.x, b.y, this.ballR-1.5, 0, Math.PI*2); ctx.stroke();
+        }
+        if (b.id > 0) {
+          ctx.fillStyle = '#FFF'; ctx.beginPath(); ctx.arc(b.x, b.y, 4, 0, Math.PI*2); ctx.fill();
+          ctx.fillStyle = '#000'; ctx.font = 'bold 6px Arial'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+          ctx.fillText(b.id, b.x, b.y);
+        }
+      }
+      // HUD
+      ctx.fillStyle = '#FFF'; ctx.font = 'bold 16px Google Sans'; ctx.textAlign = 'center';
+      if (this.msgTimer > 0) ctx.fillText(this.message, this.tableW/2, -25);
+      ctx.textAlign = 'left'; ctx.font = '12px Google Sans';
+      ctx.fillText(`Player: ${this.playerSet || 'Open'}`, 0, this.tableH + 20);
+      ctx.textAlign = 'right';
+      ctx.fillText(`AI: ${this.aiSet || 'Open'}`, this.tableW, this.tableH + 20);
+      ctx.restore();
+    }
+  },
 
   'Pokemon Play': {
     cat: 'Arcade', engine: 'dom', icon: 'https://i.pinimg.com/736x/9c/fe/9f/9cfe9fffa04e63796db1f66e14e631ae.jpg', dev: 'Professor Labs', rating: 5.0, installs: '1M',
@@ -11517,7 +11912,7 @@ function togglePause(){
 // ════════════════════════════════════════════════════════════
 //  STORE & CASINO LOGIC
 // ════════════════════════════════════════════════════════════
-var ARCADE  = ['Pokemon Play','Burger Boss', 'Cafe Tycoon', 'Candy Run', 'Cyber Jump', 'Flappy Bot', 'Hang Man', 'PacMan', 'Piano Tiles', 'Retro Snake', 'Sector 4: Containment', 'Sector Defense', 'Severity 1: Core Breach', 'Spam Defender'];
+var ARCADE  = ['Pokemon Play','Burger Boss', 'Cafe Tycoon', 'Candy Run', 'Cyber Jump', 'Flappy Bot', 'Hang Man', 'PacMan', 'Piano Tiles', 'Retro Snake', 'Sector 4: Containment', 'Sector Defense', 'Severity 1: Core Breach', 'Spam Defender', '8 Ball Pool'];
 var BRAIN   = ['2048', '4 Emojis 1 Word', 'Candy Crush', 'Cosmic Merge', 'Memory Flip', 'Minesweeper', 'Sudoku', 'Tetris'];
 var CARD    = ['Playdle', 'Solitaire'];
 
@@ -11536,8 +11931,8 @@ function buildStore(){
 
 function renderFeatured(names){
   var row=document.getElementById('rowFeatured');if(!row)return;row.innerHTML='';
-  var badges={'Severity 1: Core Breach':'🔥 Event', 'Tetris':'🏆 Top Rated','Playdle':'🟩 Word Game','Cyber Jump':'🔥 Hot','2048':'🧠 Brain Flex','PacMan':'💥 Action', '4 Emojis 1 Word':'🧩 New Puzzle'};
-  var badgeClass={'Severity 1: Core Breach':'hot', 'Tetris':'top','Playdle':'new','Cyber Jump':'hot','2048':'new','PacMan':'hot', '4 Emojis 1 Word':'new'};
+  var badges={'Severity 1: Core Breach':'🔥 Event', 'Tetris':'🏆 Top Rated','Playdle':'🟩 Word Game','Cyber Jump':'🔥 Hot','2048':'🧠 Brain Flex','PacMan':'💥 Action', '4 Emojis 1 Word':'🧩 New Puzzle', '8 Ball Pool':'🎱 Billiards'};
+  var badgeClass={'Severity 1: Core Breach':'hot', 'Tetris':'top','Playdle':'new','Cyber Jump':'hot','2048':'new','PacMan':'hot', '4 Emojis 1 Word':'new', '8 Ball Pool':'new'};
   names.forEach(name=>{ 
     var game=Games[name];if(!game)return; 
     var pb=personalBests[name]; 
@@ -12432,7 +12827,8 @@ window.addEventListener('mousemove', e => {
 var GAME_BG = { 
   'Candy Run': '#FF9AA2',
   'Sector Defense': '#1A1A2E',
-  'Burger Boss': '#FF8A80'
+  'Burger Boss': '#FF8A80',
+  '8 Ball Pool': '#2E7D32'
 };
 
 buildStore(); 
