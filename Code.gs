@@ -285,7 +285,7 @@ function saveScore(game, diff, score, token) {
     const MIN_DURATION_MS = {
       'Sudoku': 30000, 'Solitaire': 45000, 'Playdle': 15000,
       'Minesweeper': 20000, 'Tetris': 30000, '2048': 20000,
-      'Candy Run': 3000, 'Flappy Bot': 3000 // Allow quick deaths!
+      'Candy Run': 3000, 'Flappy Bot': 3000, '8 Ball Pool': 60000 // Allow quick deaths!
     };
     
     const startTime = parseInt(cache.get('game_start_' + user) || '0');
@@ -309,7 +309,8 @@ function saveScore(game, diff, score, token) {
       'Cyber Jump': 6000000, 'Candy Crush': 2500000, '4 Emojis 1 Word': 900000,
       'Severity 1: Core Breach': 25000000, 'Cosmic Merge': 1500000,
       'Sector 4: Containment': 450000, 'Angry Agents': 750000,
-      'Candy Run': 5000000 // ADDED CANDY RUN CAP
+      'Candy Run': 5000000,
+      '8 Ball Pool': 50000 // Updated Cap for new scoring
     };
     
     if (MAX_SCORES[game] && finalScore > MAX_SCORES[game]) {
@@ -497,7 +498,9 @@ const ACHIEVEMENT_DEFS = {
   'piano_apprentice': { label: '🎵 Apprentice', desc: 'Reach a 50x combo in Piano Tiles.' },
   'piano_maestro': { label: '🎹 Maestro', desc: 'Reach a 100x combo in Piano Tiles.' },
   'blind_musician': { label: '🦇 Blind Musician', desc: 'Score 500+ points on Hard in Piano Tiles.' },
-  'spam_boss': { label: '👹 Inbox Zero', desc: 'Defeat the Boss in Spam Defender.' }
+  'spam_boss': { label: '👹 Inbox Zero', desc: 'Defeat the Boss in Spam Defender.' },
+  'pool_win': { label: '🎱 Pool Shark', desc: 'Win a game of 8 Ball Pool against the AI.' },
+  'pool_clean': { label: '🧹 Clean Sweep', desc: 'Pot all your balls without the AI potting any of theirs.' }
 };
 
 function saveAchievement(achId) {
